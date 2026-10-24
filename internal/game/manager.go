@@ -3,6 +3,7 @@ package game
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -39,7 +40,7 @@ func (gm *Manager) ExitGame() error {
 
 		data := gm.gr.GetData()
 		if data.OpenMenus.QuitMenu {
-			fmt.Println("Quit menu detected, attempting to click exit button.")
+			slog.Debug("quit menu detected, attempting to click exit button")
 			// The click coordinates for the quit menu button are typically around the center, slightly above
 			gm.hid.Click(LeftButton, gm.gr.GameAreaSizeX/2, int(float64(gm.gr.GameAreaSizeY)/2.2))
 			utils.Sleep(100) // Give it time to process the click and transition out of game
@@ -48,7 +49,7 @@ func (gm *Manager) ExitGame() error {
 			}
 		}
 
-		fmt.Printf("Attempt %d: Trying to open menu and exit game...\n", attempt+1)
+		slog.Debug("trying to open menu and exit game", "attempt", attempt+1)
 		gm.hid.PressKey(win.VK_ESCAPE)
 
 		if !gm.gr.InGame() {
@@ -58,7 +59,7 @@ func (gm *Manager) ExitGame() error {
 		// Check again if the Quit Menu is now open after pressing ESC
 		data = gm.gr.GetData()
 		if data.OpenMenus.QuitMenu {
-			fmt.Println("Quit menu opened after ESC, attempting to click exit button.")
+			slog.Debug("quit menu opened after ESC, attempting to click exit button")
 			gm.hid.Click(LeftButton, gm.gr.GameAreaSizeX/2, int(float64(gm.gr.GameAreaSizeY)/2.2))
 			utils.Sleep(100) // Give it time to process the click and transition out of game
 			if !gm.gr.InGame() {
@@ -398,7 +399,7 @@ func StartGame(username string, password string, authmethod string, authToken st
 
 		// Check if the window is a GPU error dialog
 		if isGPUErrorWindow(foundHwnd) {
-			fmt.Printf("GPU initialization error detected (attempt %d/%d), retrying...\n", attempt+1, maxGPURetries)
+			slog.Warn("GPU initialization error detected, retrying", "attempt", attempt+1, "maxAttempts", maxGPURetries)
 			closeWindowAndTerminateProcess(foundHwnd, uint32(cmd.Process.Pid))
 			time.Sleep(2 * time.Second)
 			continue // Retry

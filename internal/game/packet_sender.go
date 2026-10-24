@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/hectorgimenez/d2go/pkg/data"
 	"github.com/hectorgimenez/d2go/pkg/data/skill"
@@ -54,7 +55,7 @@ func (ps *PacketSender) Teleport(position data.Position) error {
 	payload := packet.NewTeleport(position).GetPayload()
 
 	// Debug: log the packet being sent
-	fmt.Printf("Sending teleport packet: X=%d Y=%d Hex=%02X\n", position.X, position.Y, payload)
+	slog.Debug("sending teleport packet", "x", position.X, "y", position.Y)
 
 	if err := ps.SendPacket(payload); err != nil {
 		return fmt.Errorf("failed to send teleport packet: %w", err)

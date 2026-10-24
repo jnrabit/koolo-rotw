@@ -2,7 +2,6 @@ package action
 
 import (
 	"errors"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strconv"
@@ -277,14 +276,14 @@ func shouldStashIt(i data.Item, firstRun bool) (bool, bool, string, string) {
 	}
 
 	// These items should NEVER be stashed, regardless of quest status, pickit rules, or first run.
-	fmt.Printf("DEBUG: Evaluating item '%s' for *absolute* exclusion from stash.\n", i.Name)
+	ctx.Logger.Debug("evaluating item for absolute exclusion from stash", "item", i.Name)
 	if i.Name == "horadricstaff" { // This is the simplest way given your logs
-		fmt.Printf("DEBUG: ABSOLUTELY PREVENTING stash for '%s' (Horadric Staff exclusion).\n", i.Name)
+		ctx.Logger.Debug("preventing stash - Horadric Staff exclusion", "item", i.Name)
 		return false, false, "", "" // Explicitly do NOT stash the Horadric Staff
 	}
 
 	if i.Name == "TomeOfTownPortal" || i.Name == "TomeOfIdentify" || i.Name == "Key" || i.Name == "WirtsLeg" {
-		fmt.Printf("DEBUG: ABSOLUTELY PREVENTING stash for '%s' (Quest/Special item exclusion).\n", i.Name)
+		ctx.Logger.Debug("preventing stash - quest/special item exclusion", "item", i.Name)
 		return false, false, "", ""
 	}
 
@@ -293,7 +292,7 @@ func shouldStashIt(i data.Item, firstRun bool) (bool, bool, string, string) {
 	}
 
 	if firstRun {
-		fmt.Printf("DEBUG: Allowing stash for '%s' (first run).\n", i.Name)
+		ctx.Logger.Debug("allowing stash on first run", "item", i.Name)
 		return true, false, "FirstRun", ""
 	}
 
@@ -327,11 +326,11 @@ func shouldStashIt(i data.Item, firstRun bool) (bool, bool, string, string) {
 	if res == nip.RuleResultFullMatch {
 		if doesExceedQuantity(rule) {
 			// If it matches a rule but exceeds quantity, we want to drop it, not stash.
-			fmt.Printf("DEBUG: Dropping '%s' because MaxQuantity is exceeded.\n", i.Name)
+			ctx.Logger.Debug("dropping item - max quantity exceeded", "item", i.Name, "rule", rule.RawLine)
 			return false, true, rule.RawLine, rule.Filename + ":" + strconv.Itoa(rule.LineNumber)
 		} else {
 			// If it matches a rule and quantity is fine, stash it.
-			fmt.Printf("DEBUG: Allowing stash for '%s' (pickit rule match: %s).\n", i.Name, rule.RawLine)
+			ctx.Logger.Debug("allowing stash - pickit rule match", "item", i.Name, "rule", rule.RawLine)
 			return true, false, rule.RawLine, rule.Filename + ":" + strconv.Itoa(rule.LineNumber)
 		}
 	}
@@ -340,7 +339,7 @@ func shouldStashIt(i data.Item, firstRun bool) (bool, bool, string, string) {
 		return true, false, "Runeword", ""
 	}
 
-	fmt.Printf("DEBUG: Disallowing stash for '%s' (no rule match and not explicitly kept, and not exceeding quantity).\n", i.Name)
+	ctx.Logger.Debug("disallowing stash - no rule match", "item", i.Name)
 	return false, false, "", "" // Default if no other rule matches
 }
 

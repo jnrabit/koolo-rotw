@@ -220,7 +220,9 @@ func (b *Bot) Run(ctx context.Context, firstRun bool, runs []run.Run) error {
 		defer func() {
 			cancel()
 			b.Stop()
-			recover()
+			if r := recover(); r != nil {
+				slog.Error("panic recovered in high priority loop", "panic", r)
+			}
 		}()
 
 		b.ctx.AttachRoutine(botCtx.PriorityHigh)

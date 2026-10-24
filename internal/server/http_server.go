@@ -78,7 +78,18 @@ var (
 
 	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
-			return true
+			// Only allow localhost connections to prevent CSRF/WebSocket hijacking
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return true // Allow if no Origin header (same-origin requests)
+			}
+			u, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+			// Only allow localhost/127.0.0.1 and ::1 (IPv6 loopback)
+			host := strings.Split(u.Host, ":")[0]
+			return host == "localhost" || host == "127.0.0.1" || host == "::1"
 		},
 	}
 )

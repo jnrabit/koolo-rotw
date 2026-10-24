@@ -1,6 +1,8 @@
 package server
 
 import (
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -31,22 +33,22 @@ func TestWebSocketServerCreation(t *testing.T) {
 func TestWebSocketBroadcast(t *testing.T) {
 	t.Run("broadcast to multiple clients", func(t *testing.T) {
 		ws := NewWebSocketServer()
-		
+
 		// Run the server loop in a goroutine
 		go ws.Run()
-		
+
 		// Give the server time to start
 		time.Sleep(10 * time.Millisecond)
-		
+
 		// Create test message
 		testMsg := []byte("test message")
-		
+
 		// Send broadcast
 		ws.broadcast <- testMsg
-		
+
 		// Give it time to process
 		time.Sleep(10 * time.Millisecond)
-		
+
 		// If no panic, test passes
 	})
 }
@@ -78,8 +80,16 @@ func TestCORSValidation(t *testing.T) {
 }
 
 // Helper function to check if origin is localhost
+// This mirrors the CheckOrigin validation from http_server.go
 func isLocalhost(origin string) bool {
-	// Simple check - real implementation in http_server.go CheckOrigin function
-	return origin == "" || 
-		len(origin) > 7 && (origin[:7] == "http://" || origin[:8] == "https://")
+	if origin == "" {
+		return true // Allow if no Origin header (same-origin requests)
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	// Only allow localhost/127.0.0.1 and ::1 (IPv6 loopback)
+	host := strings.Split(u.Host, ":")[0]
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }

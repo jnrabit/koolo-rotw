@@ -46,9 +46,10 @@ func (sm *ShutdownManager) WaitForShutdownSignal(ctx context.Context) <-chan str
 	shutdownChan := make(chan struct{})
 	go func() {
 		sigChan := make(chan os.Signal, 1)
+		defer signal.Stop(sigChan)
 		signal.Notify(sigChan,
-			syscall.SIGINT,   // Ctrl+C
-			syscall.SIGTERM,  // Termination signal
+			syscall.SIGINT,  // Ctrl+C
+			syscall.SIGTERM, // Termination signal
 		)
 
 		select {

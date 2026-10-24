@@ -581,7 +581,7 @@ func (s *SorceressLeveling) killMonsterByName(id npc.ID, monsterType data.Monste
 		if m, found := s.Data.Monsters.FindOne(id, monsterType); found {
 			// If the monster's life is 0 or less, it's dead, so break the loop
 			if m.Stats[stat.Life] <= 0 {
-				fmt.Printf("Monster %s (ID: %d) is dead. Breaking attack loop.\n", m.Name, m.UnitID)
+				slog.Debug("monster is dead, breaking attack loop", "name", m.Name, "id", m.UnitID)
 				break
 			}
 
@@ -594,7 +594,7 @@ func (s *SorceressLeveling) killMonsterByName(id npc.ID, monsterType data.Monste
 
 			if err != nil {
 				// Handle errors from KillMonsterSequence, e.g., monster vanished during attack
-				fmt.Printf("Error during KillMonsterSequence: %v. Breaking attack loop.\n", err)
+				slog.Debug("error during KillMonsterSequence, breaking attack loop", "error", err)
 				break
 			}
 
@@ -603,7 +603,7 @@ func (s *SorceressLeveling) killMonsterByName(id npc.ID, monsterType data.Monste
 
 		} else {
 			// Monster not found, it might have died or moved out of detection range
-			fmt.Printf("Monster (ID: %d, Type: %s) not found. Assuming it's dead or vanished. Breaking loop.\n", id, monsterType)
+			slog.Debug("monster not found, assuming dead or vanished, breaking loop", "id", id, "type", monsterType)
 			break
 		}
 	}

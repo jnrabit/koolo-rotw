@@ -2,6 +2,7 @@ package run
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/hectorgimenez/d2go/pkg/data"
 	"github.com/hectorgimenez/d2go/pkg/data/area"
@@ -41,7 +42,7 @@ func (a *FireEye) CheckConditions(parameters *RunParameters) SequencerResult {
 
 func (f *FireEye) Run(parameters *RunParameters) error {
 
-	fmt.Println("Fire Eye: Traveling to Arcane Sanctuary...")
+	slog.Info("fire eye: traveling to Arcane Sanctuary")
 	err := action.WayPoint(area.ArcaneSanctuary)
 	if err != nil {
 		return fmt.Errorf("could not travel to Arcane Sanctuary: %w", err)

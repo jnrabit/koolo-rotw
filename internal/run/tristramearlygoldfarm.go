@@ -3,6 +3,7 @@ package run
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/hectorgimenez/d2go/pkg/data"
 	"github.com/hectorgimenez/d2go/pkg/data/area"
@@ -46,7 +47,7 @@ func (t *TristramEarlyGoldfarm) CheckConditions(parameters *RunParameters) Seque
 // It travels to Stony Field, finds a Cairn Stone, moves to it, and clears the surrounding monsters.
 func (t *TristramEarlyGoldfarm) Run(parameters *RunParameters) error {
 	// Use waypoint to StonyField
-	fmt.Println("TristramEarlyGoldfarm: Traveling to Stony Field...")
+	slog.Info("tristram early goldfarm: traveling to Stony Field")
 	err := action.WayPoint(area.StonyField)
 	if err != nil {
 		return fmt.Errorf("could not travel to Stony Field: %w", err)
@@ -67,12 +68,12 @@ func (t *TristramEarlyGoldfarm) Run(parameters *RunParameters) error {
 		return errors.New("Cairn Stone not found in Stony Field")
 	}
 
-	fmt.Println("TristramEarlyGoldfarm: Found Cairn Stone. Moving to position...")
+	slog.Info("tristram early goldfarm: found Cairn Stone, moving to position")
 	// Move to the cairnStone
 	action.MoveToCoords(cairnStone.Position)
 
 	// Clear area around the portal
-	fmt.Println("TristramEarlyGoldfarm: Clearing area around the stone...")
+	slog.Info("tristram early goldfarm: clearing area around the stone")
 	action.ClearAreaAroundPlayer(40, data.MonsterAnyFilter())
 
 	t.ctx.RefreshGameData()
@@ -82,7 +83,7 @@ func (t *TristramEarlyGoldfarm) Run(parameters *RunParameters) error {
 	action.ItemPickup(-1)
 	utils.Sleep(500)
 
-	fmt.Println("TristramEarlyGoldfarm: Run complete.")
+	slog.Info("tristram early goldfarm: run complete")
 
 	return nil
 }

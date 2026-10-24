@@ -10,10 +10,10 @@ import (
 
 // LogRotationConfig holds configuration for log file rotation
 type LogRotationConfig struct {
-	MaxFileSize int64         // Maximum size of log file in bytes (default: 100MB)
-	MaxBackups  int           // Maximum number of backup files to keep (default: 5)
-	MaxAgeDays  int           // Maximum age of log files in days (default: 30)
-	Compress    bool          // Whether to compress rotated logs (default: true)
+	MaxFileSize int64 // Maximum size of log file in bytes (default: 100MB)
+	MaxBackups  int   // Maximum number of backup files to keep (default: 5)
+	MaxAgeDays  int   // Maximum age of log files in days (default: 30)
+	Compress    bool  // Whether to compress rotated logs (default: true)
 }
 
 // RotateLogsIfNeeded checks if log file needs rotation and performs it

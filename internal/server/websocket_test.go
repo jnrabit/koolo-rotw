@@ -112,10 +112,10 @@ func TestCORSSecurityBypass(t *testing.T) {
 	blockedOrigins := []string{
 		"http://evil.com",
 		"https://attacker.com",
-		"http://localhost.attacker.com",  // Subdomain trick
-		"http://127.0.0.1.attacker.com",  // Subdomain trick
-		"http://192.168.1.1",              // Private IP (not localhost)
-		"http://::1.attacker.com",         // Subdomain trick on IPv6
+		"http://localhost.attacker.com", // Subdomain trick
+		"http://127.0.0.1.attacker.com", // Subdomain trick
+		"http://192.168.1.1",            // Private IP (not localhost)
+		"http://::1.attacker.com",       // Subdomain trick on IPv6
 	}
 
 	for _, origin := range blockedOrigins {

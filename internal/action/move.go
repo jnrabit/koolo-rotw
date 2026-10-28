@@ -124,6 +124,8 @@ func ensureAreaSync(ctx *context.Status, expectedArea area.ID) error {
 func MoveToArea(dst area.ID) error {
 	ctx := context.Get()
 	ctx.SetLastAction("MoveToArea")
+	ctx.Logger.Debug(fmt.Sprintf("MoveToArea: dest=%s playerPos=(%d,%d) playerArea=%d",
+		dst.Area().Name, ctx.Data.PlayerUnit.Position.X, ctx.Data.PlayerUnit.Position.Y, ctx.Data.PlayerUnit.Area))
 
 	// Proactive death check at the start of the action
 	if err := checkPlayerDeath(ctx); err != nil {
@@ -132,6 +134,14 @@ func MoveToArea(dst area.ID) error {
 
 	if err := ensureAreaSync(ctx, ctx.Data.PlayerUnit.Area); err != nil {
 		return err
+	}
+
+	// Already at the destination: adjacent levels never contain the current
+	// area itself, so without this check we would fail with
+	// "destination area not found" while standing inside the target area.
+	if ctx.Data.PlayerUnit.Area == dst {
+		ctx.Logger.Debug("MoveToArea: already in destination area", slog.String("area", dst.Area().Name))
+		return nil
 	}
 
 	// Exceptions for:

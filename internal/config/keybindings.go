@@ -41,12 +41,23 @@ func EnsureSkillKeyBindings(cfg *CharacterCfg, useCustomSettings bool) (KeyBindi
 		return result, nil
 	}
 
+	// Key binding files (.keyo/.key) always live in the main Saved Games dir,
+	// not under mods/<modName>. Fall back to the main dir if the mod dir
+	// does not contain them.
+	mainDir := settingsPath
+	characterName := strings.TrimSpace(cfg.CharacterName)
+	if characterName != "" {
+		if _, exists, err := resolveKeyBindingPath(mainDir, characterName, cfg.AuthMethod); err == nil && exists {
+			saveDir = mainDir
+			result.SaveDir = mainDir
+		}
+	}
+
 	if _, err := os.Stat(saveDir); os.IsNotExist(err) {
 		result.Missing = true
 		return result, nil
 	}
 
-	characterName := strings.TrimSpace(cfg.CharacterName)
 	if characterName == "" {
 		result.Missing = true
 		return result, nil

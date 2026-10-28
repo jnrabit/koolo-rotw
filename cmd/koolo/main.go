@@ -158,7 +158,6 @@ func main() {
 	}
 
 	g.Go(wrapWithRecover(logger, func() error {
-		defer cancel()
 		displayScale := config.GetCurrentDisplayScale()
 
 		// 1. Load dimensions from config, or use defaults
@@ -182,7 +181,9 @@ func main() {
 			if w != nil {
 				w.Destroy()
 			}
-			return fmt.Errorf("error creating webview: %w", err)
+			logger.Warn("Webview could not be started, running headless. Open http://localhost:8087 in a browser", slog.Any("error", err))
+			<-ctx.Done()
+			return nil
 		}
 
 		// 2. Set HintNone to allow mouse resizing

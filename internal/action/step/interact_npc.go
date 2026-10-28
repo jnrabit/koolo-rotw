@@ -10,6 +10,7 @@ import (
 	"github.com/hectorgimenez/koolo/internal/game"
 	"github.com/hectorgimenez/koolo/internal/pather"
 	"github.com/hectorgimenez/koolo/internal/ui"
+	"github.com/hectorgimenez/koolo/internal/utils"
 )
 
 func InteractNPC(npcID npc.ID) error {
@@ -58,6 +59,16 @@ func InteractNPC(npcID npc.ID) error {
 			continue
 		}
 
+		if attempts == 0 || attempts == 4 {
+			ctx.Logger.Debug("InteractNPC unit data",
+				"npc", int(npcID),
+				"unitID", int(townNPC.UnitID),
+				"npcPos", fmt.Sprintf("%d,%d", townNPC.Position.X, townNPC.Position.Y),
+				"playerPos", fmt.Sprintf("%d,%d", ctx.Data.PlayerUnit.Position.X, ctx.Data.PlayerUnit.Position.Y),
+				"type", townNPC.Type,
+				"hovered", townNPC.IsHovered)
+		}
+
 		distance := ctx.PathFinder.DistanceFromMe(townNPC.Position)
 		if distance > maxDistance {
 			return fmt.Errorf("NPC %d is too far away (distance: %d)", npcID, distance)
@@ -69,19 +80,20 @@ func InteractNPC(npcID npc.ID) error {
 			y = y - 40 // Tyrael has a super weird hitbox
 		}
 
-		// Move mouse and wait for hover
+		// Move mouse and click directly. Waiting for the IsHovered unit flag
+		// never succeeds under Wine (the flag is not set even with real
+		// SendInput moves), but D2R opens the NPC menu when the click
+		// position hits the NPC hitbox - same path as movement clicks.
 		ctx.HID.MovePointer(x, y)
-		hoverStart := time.Now()
-
-		for time.Since(hoverStart) < hoverWait {
-			if currentNPC, found := ctx.Data.Monsters.FindOne(npcID, data.MonsterTypeNone); found && currentNPC.IsHovered {
-				targetNPCID = currentNPC.UnitID
-				ctx.HID.Click(game.LeftButton, x, y)
-				time.Sleep(minMenuOpenWait)
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
+		utils.Sleep(100)
+		targetNPCID = townNPC.UnitID
+		ctx.HID.Click(game.LeftButton, x, y)
+		time.Sleep(minMenuOpenWait)
+		ctx.Logger.Debug("InteractNPC attempt",
+			"npc", int(npcID),
+			"attempts", attempts,
+			"menuOpen", ctx.Data.OpenMenus.NPCInteract || ctx.Data.OpenMenus.NPCShop,
+			"clickPos", fmt.Sprintf("%d,%d", x, y))
 	}
 
 	return fmt.Errorf("failed to interact with NPC after %d attempts", maxAttempts)

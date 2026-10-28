@@ -34,7 +34,11 @@ type MemoryReader struct {
 }
 
 func NewGameReader(cfg *config.CharacterCfg, supervisorName string, pid uint32, window win.HWND, logger *slog.Logger) (*MemoryReader, error) {
-	process, err := memory.NewProcessForPID(pid)
+	return NewGameReaderWithLinux(cfg, supervisorName, pid, 0, window, logger)
+}
+
+func NewGameReaderWithLinux(cfg *config.CharacterCfg, supervisorName string, pid, linuxPID uint32, window win.HWND, logger *slog.Logger) (*MemoryReader, error) {
+	process, err := memory.NewProcessForPIDWithLinux(pid, linuxPID)
 	if err != nil {
 		return nil, err
 	}
@@ -234,6 +238,15 @@ func (gd *MemoryReader) SetTeleportableDiagonal(grid *[][]CollisionType, xStart 
 }
 
 func (gd *MemoryReader) updateWindowPositionData() {
+	// HWND may be 0 under Wine/Proton+Wayland (EnumWindows finds nothing).
+	// Fall back to configured window origin / zero origin; clicks use client coords.
+	if gd.HWND == 0 {
+		gd.WindowLeftX = 0
+		gd.WindowTopY = 0
+		gd.GameAreaSizeX = 1280
+		gd.GameAreaSizeY = 720
+		return
+	}
 	pos := win.WINDOWPLACEMENT{}
 	point := win.POINT{}
 	win.ClientToScreen(gd.HWND, &point)

@@ -3,7 +3,10 @@ package bot
 import (
 	"fmt"
 	"log/slog"
+	"os"
+	"runtime/debug"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -23,12 +26,50 @@ import (
 	"github.com/lxn/win"
 )
 
+// findLinuxPIDForWineProcess scans /proc for the D2R Main process.
+// Under Wine/Proton, D2R.exe runs as comm="Main" with the game path in cmdline.
+func findLinuxPIDForWineProcess() uint32 {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return 0
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pidStr := e.Name()
+		if _, err := strconv.Atoi(pidStr); err != nil {
+			continue
+		}
+		// Check comm
+		comm, err := os.ReadFile("/proc/" + pidStr + "/comm")
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(string(comm)) != "Main" {
+			continue
+		}
+		// Check cmdline for d2r/diablo
+		cmdline, err := os.ReadFile("/proc/" + pidStr + "/cmdline")
+		if err != nil {
+			continue
+		}
+		lower := strings.ToLower(string(cmdline))
+		if strings.Contains(lower, "d2r") || strings.Contains(lower, "diablo") {
+			pid, _ := strconv.ParseUint(pidStr, 10, 32)
+			return uint32(pid)
+		}
+	}
+	return 0
+}
+
 type SupervisorManager struct {
 	logger         *slog.Logger
 	supervisors    map[string]Supervisor
 	crashDetectors map[string]*game.CrashDetector
 	eventListener  *event.Listener
 	Drop           *drop.Service // Drop: Service façade to manage Drop domain
+	linuxPID       uint32        // Linux PID for /proc fallback under Wine
 }
 
 func NewSupervisorManager(logger *slog.Logger, eventListener *event.Listener) *SupervisorManager {
@@ -54,6 +95,17 @@ func (mng *SupervisorManager) AvailableSupervisors() []string {
 }
 
 func (mng *SupervisorManager) Start(supervisorName string, attachToExisting bool, manualMode bool, pidHwnd ...uint32) error {
+	defer func() {
+		if r := recover(); r != nil {
+			mng.logger.Error("PANIC in manager.Start",
+				"supervisor", supervisorName,
+				"panic", fmt.Sprintf("%v", r),
+				"stack", string(debug.Stack()))
+			delete(mng.supervisors, supervisorName)
+			delete(mng.crashDetectors, supervisorName)
+		}
+	}()
+
 	// Avoid multiple instances of the supervisor - shitstorm prevention
 	if _, exists := mng.supervisors[supervisorName]; exists {
 		return fmt.Errorf("supervisor %s is already running", supervisorName)
@@ -74,19 +126,26 @@ func (mng *SupervisorManager) Start(supervisorName string, attachToExisting bool
 	var optionalHWND win.HWND
 
 	if attachToExisting {
-		if len(pidHwnd) == 2 {
-			mng.logger.Info("Attaching to existing game", "pid", pidHwnd[0], "hwnd", pidHwnd[1])
+		if len(pidHwnd) >= 1 {
+			mng.logger.Info("Attaching to existing game", "pid", pidHwnd[0], "hwnd", optionalHWND)
 			optionalPID = pidHwnd[0]
-			optionalHWND = win.HWND(pidHwnd[1])
+			if len(pidHwnd) >= 2 {
+				optionalHWND = win.HWND(pidHwnd[1])
+			}
+			if len(pidHwnd) >= 3 {
+				mng.linuxPID = pidHwnd[2]
+			}
 		} else {
-			return fmt.Errorf("pid and hwnd are required when attaching to an existing game")
+			return fmt.Errorf("pid is required when attaching to an existing game")
 		}
 	}
 
 	supervisor, crashDetector, err := mng.buildSupervisor(supervisorName, supervisorLogger, attachToExisting, optionalPID, optionalHWND)
 	if err != nil {
+		mng.logger.Error("DIAG: buildSupervisor failed", "supervisor", supervisorName, "error", err.Error())
 		return err
 	}
+	mng.logger.Info("DIAG: supervisor object built, setting mode")
 
 	// Set manual mode flag
 	ctx := supervisor.GetContext()
@@ -118,6 +177,7 @@ func (mng *SupervisorManager) Start(supervisorName string, attachToExisting bool
 
 	// Start the Crash Detector in a thread to avoid blocking and speed up start
 	go crashDetector.Start()
+	mng.logger.Info("DIAG: crash detector started, calling supervisor.Start()")
 
 	err = supervisor.Start()
 	if err != nil {
@@ -243,11 +303,12 @@ func (mng *SupervisorManager) buildSupervisor(supervisorName string, logger *slo
 	var hwnd win.HWND
 
 	if attach {
-		if optionalPID != 0 && optionalHWND != 0 {
+		// HWND may be 0 under Wine/Proton+Wayland; only PID is required for memory attach.
+		if optionalPID != 0 {
 			pid = optionalPID
 			hwnd = optionalHWND
 		} else {
-			return nil, nil, fmt.Errorf("pid and hwnd are required when attaching to an existing game")
+			return nil, nil, fmt.Errorf("pid is required when attaching to an existing game")
 		}
 	} else {
 		var err error
@@ -262,17 +323,31 @@ func (mng *SupervisorManager) buildSupervisor(supervisorName string, logger *slo
 		}
 	}
 
-	gr, err := game.NewGameReader(cfg, supervisorName, pid, hwnd, logger)
+	mng.logger.Info("DIAG: cfg loaded, building game reader", "pid", pid, "hwnd", hwnd)
+
+	// When starting a new game (not attaching), find the Linux PID for /proc fallback.
+	linuxPID := mng.linuxPID
+	if linuxPID == 0 && pid != 0 {
+		linuxPID = findLinuxPIDForWineProcess()
+		if linuxPID != 0 {
+			mng.logger.Info("DIAG: found Linux PID for new game", "winePID", pid, "linuxPID", linuxPID)
+		}
+	}
+
+	gr, err := game.NewGameReaderWithLinux(cfg, supervisorName, pid, linuxPID, hwnd, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating game reader: %w", err)
 	}
+	mng.logger.Info("DIAG: game reader created")
 
 	gi, err := game.InjectorInit(logger, gr.GetPID())
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating game injector: %w", err)
 	}
+	mng.logger.Info("DIAG: injector initialized")
 
 	ctx := context.NewContext(supervisorName)
+	mng.logger.Info("DIAG: context created")
 
 	hidM := game.NewHID(gr, gi)
 	pf := pather.NewPathFinder(gr, ctx.Data, hidM, cfg)
@@ -297,6 +372,7 @@ func (mng *SupervisorManager) buildSupervisor(supervisorName string, logger *slo
 		return nil, nil, fmt.Errorf("error creating character: %w", err)
 	}
 	ctx.Char = char
+	mng.logger.Info("DIAG: character built")
 
 	muleManager := mule.NewManager(logger)
 	bot := NewBot(ctx.Context, muleManager)
@@ -414,6 +490,7 @@ func (mng *SupervisorManager) buildSupervisor(supervisorName string, logger *slo
 	winproc.SetWindowText.Call(uintptr(hwnd), uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(gameTitle))))
 	crashDetector := game.NewCrashDetector(supervisorName, int32(pid), uintptr(hwnd), mng.logger, restartFunc)
 
+	mng.logger.Info("DIAG: buildSupervisor done")
 	return supervisor, crashDetector, nil
 }
 

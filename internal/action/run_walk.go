@@ -6,6 +6,7 @@ import (
 	"github.com/hectorgimenez/d2go/pkg/data"
 	"github.com/hectorgimenez/d2go/pkg/data/mode"
 	"github.com/hectorgimenez/koolo/internal/context"
+	"github.com/hectorgimenez/koolo/internal/game"
 	"github.com/hectorgimenez/koolo/internal/utils"
 )
 
@@ -42,13 +43,12 @@ func EnsureRunMode() {
 		return
 	}
 
-	centerX := ctx.GameReader.GameAreaSizeX / 2
-	centerY := ctx.GameReader.GameAreaSizeY / 2
-	screenX := clampInt(centerX+40, 0, ctx.GameReader.GameAreaSizeX-1)
-	screenY := clampInt(centerY-10, 0, ctx.GameReader.GameAreaSizeY-1)
+	// Virtual 1280x720 center; Click scales to actual window.
+	// Left-click moves the character (D2R default); we sample the mode after.
+	screenX := 680
+	screenY := 350
 
-	ctx.HID.MovePointer(screenX, screenY)
-	ctx.HID.PressKeyBinding(ctx.Data.KeyBindings.ForceMove)
+	ctx.HID.Click(game.LeftButton, screenX, screenY)
 	utils.PingSleep(utils.Light, 80)
 
 	deadline := time.Now().Add(runWalkSampleTimeout)

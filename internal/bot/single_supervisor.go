@@ -151,14 +151,17 @@ func (s *SinglePlayerSupervisor) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancelFn = cancel
 
+	s.bot.ctx.Logger.Info("DIAG: prepare start")
 	err := s.ensureProcessIsRunningAndPrepare()
 	if err != nil {
 		return fmt.Errorf("error preparing game: %w", err)
 	}
+	s.bot.ctx.Logger.Info("DIAG: process prepared (injector loaded)")
 
 	if err := s.ensureSkillKeyBindingsReady(); err != nil {
 		return err
 	}
+	s.bot.ctx.Logger.Info("DIAG: skill key bindings ready")
 
 	// MANUAL MODE: Early exit - handle before normal game loop
 	if s.bot.ctx.ManualModeActive {
@@ -231,7 +234,12 @@ func (s *SinglePlayerSupervisor) Start() error {
 		}
 
 		if firstRun {
-			if err = s.waitUntilCharacterSelectionScreen(); err != nil {
+			// If we are already in-game (attached to a running session), skip
+			// the character-selection wait to avoid spamming clicks that move
+			// the character into walls.
+			if s.bot.ctx.Manager.InGame() {
+				s.bot.ctx.Logger.Info("DIAG: already in-game at startup, skipping character selection")
+			} else if err = s.waitUntilCharacterSelectionScreen(); err != nil {
 				return fmt.Errorf("error waiting for character selection screen: %w", err)
 			}
 		}
@@ -627,12 +635,17 @@ func (s *SinglePlayerSupervisor) ensureSkillKeyBindingsReady() error {
 		s.bot.ctx.Logger.Debug("Skipping key binding check: manual mode active")
 		return nil
 	}
-	if s.bot.ctx.Manager.InGame() {
+	inGame := s.bot.ctx.Manager.InGame()
+	s.bot.ctx.Logger.Info("DIAG: InGame() returned", "inGame", inGame)
+	if inGame {
 		s.bot.ctx.Logger.Debug("Skipping key binding check: already in game")
 		return nil
 	}
 
+	s.bot.ctx.Logger.Info("DIAG: calling EnsureSkillKeyBindings")
 	kbResult, kbErr := config.EnsureSkillKeyBindings(cfg, config.Koolo.UseCustomSettings)
+	s.bot.ctx.Logger.Info("DIAG: EnsureSkillKeyBindings done",
+		"updated", kbResult.Updated, "missing", kbResult.Missing, "err", fmt.Sprint(kbErr))
 	if kbErr != nil {
 		s.bot.ctx.Logger.Warn("Failed to ensure skill key bindings", slog.Any("error", kbErr))
 	}
@@ -828,6 +841,20 @@ func (s *SinglePlayerSupervisor) HandleStandardMenuFlow() error {
 		}
 
 		if s.bot.ctx.GameReader.IsInCharacterSelectionScreen() {
+			return s.callManagerWithTimeout(s.bot.ctx.Manager.NewGame)
+		}
+	}
+
+	// Main menu fallback: if we're not at char select or lobby, we might be at
+	// the main menu (Play button). Try clicking Play to reach char select.
+	if !atCharacterSelectionScreen && !atLobbyScreen {
+		s.bot.ctx.Logger.Debug("[Menu Flow]: Not at char select or lobby, assuming main menu, clicking Play ...")
+		// D2R main menu "Play" button is at approximately (640, 300) in virtual coords.
+		s.bot.ctx.HID.Click(game.LeftButton, 640, 300)
+		time.Sleep(3000 * time.Millisecond)
+
+		if s.bot.ctx.GameReader.IsInCharacterSelectionScreen() {
+			s.bot.ctx.Logger.Debug("[Menu Flow]: Reached character selection screen after clicking Play")
 			return s.callManagerWithTimeout(s.bot.ctx.Manager.NewGame)
 		}
 	}

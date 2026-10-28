@@ -49,10 +49,12 @@ func (i *MemoryInjector) Load() error {
 		return nil
 	}
 
+	i.logger.Info("DIAG: Load() begin", "pid", i.pid)
 	modules, err := memory.GetProcessModules(i.pid)
 	if err != nil {
 		return fmt.Errorf("error getting process modules: %w", err)
 	}
+	i.logger.Info("DIAG: modules enumerated", "count", len(modules))
 
 	syscall.MustLoadDLL("USER32.dll")
 

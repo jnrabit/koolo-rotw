@@ -15,12 +15,13 @@ import (
 )
 
 func (pf *PathFinder) RandomMovement() {
-	midGameX := pf.gr.GameAreaSizeX / 2
-	midGameY := pf.gr.GameAreaSizeY / 2
+	// Virtual 1280x720 center; MovePointer scales to actual window.
+	midGameX := 640
+	midGameY := 360
 	x := midGameX + rand.Intn(midGameX) - (midGameX / 2)
 	y := midGameY + rand.Intn(midGameY) - (midGameY / 2)
-	pf.hid.MovePointer(x, y)
-	pf.hid.PressKeyBinding(pf.data.KeyBindings.ForceMove)
+	// Use left-click movement (D2R default move button).
+	pf.hid.Click(game.LeftButton, x, y)
 	utils.Sleep(50)
 }
 
@@ -84,6 +85,11 @@ func (pf *PathFinder) MoveThroughPath(p Path, walkDuration time.Duration) {
 }
 
 func (pf *PathFinder) moveThroughPathWalk(p Path, walkDuration time.Duration) {
+	// NOTE: Packet-based walking (0x03) crashes D2R under Wine. Use mouse input only.
+	pf.moveThroughPathWalkMouse(p, walkDuration)
+}
+
+func (pf *PathFinder) moveThroughPathWalkMouse(p Path, walkDuration time.Duration) {
 	// Calculate the max distance we can walk in the given duration
 	maxDistance := int(float64(25) * walkDuration.Seconds())
 
@@ -97,13 +103,13 @@ func (pf *PathFinder) moveThroughPathWalk(p Path, walkDuration time.Duration) {
 			break
 		}
 
-		// Prevent mouse overlap the HUD
-		if screenY > int(float32(pf.gr.GameAreaSizeY)/1.19) {
+		// Prevent mouse overlap the HUD (virtual 720px height)
+		if screenY > 605 {
 			break
 		}
 
-		// We are getting out of the window, let's stop
-		if screenX < 0 || screenY < 0 || screenX > pf.gr.GameAreaSizeX || screenY > pf.gr.GameAreaSizeY {
+		// We are getting out of the window, let's stop (virtual 1280x720)
+		if screenX < 0 || screenY < 0 || screenX > 1280 || screenY > 720 {
 			break
 		}
 		screenCords = data.Position{X: screenX, Y: screenY}
@@ -113,7 +119,7 @@ func (pf *PathFinder) moveThroughPathWalk(p Path, walkDuration time.Duration) {
 }
 
 func (pf *PathFinder) moveThroughPathTeleport(p Path) {
-	hudBoundary := int(float32(pf.gr.GameAreaSizeY) / 1.19)
+	hudBoundary := 605
 	fromX, fromY := p.From().X, p.From().Y
 
 	for i := len(p) - 1; i >= 0; i-- {
@@ -124,7 +130,7 @@ func (pf *PathFinder) moveThroughPathTeleport(p Path) {
 			continue
 		}
 
-		if screenX >= 0 && screenY >= 0 && screenX <= pf.gr.GameAreaSizeX && screenY <= pf.gr.GameAreaSizeY {
+		if screenX >= 0 && screenY >= 0 && screenX <= 1280 && screenY <= 720 {
 			worldPos := data.Position{
 				X: pos.X + pf.data.AreaOrigin.X,
 				Y: pos.Y + pf.data.AreaOrigin.Y,
@@ -161,7 +167,7 @@ func (pf *PathFinder) moveThroughPathTeleport(p Path) {
 }
 
 func (pf *PathFinder) GetLastPathIndexOnScreen(p Path) int {
-	hudBoundary := int(float32(pf.gr.GameAreaSizeY) / 1.19)
+	hudBoundary := 605
 	fromX, fromY := p.From().X, p.From().Y
 
 	for i := len(p) - 1; i >= 0; i-- {
@@ -237,8 +243,9 @@ func (pf *PathFinder) MoveCharacter(x, y int, gamePos ...data.Position) {
 			pf.hid.Click(game.RightButton, x, y)
 		}
 	} else {
-		pf.hid.MovePointer(x, y)
-		pf.hid.PressKeyBinding(pf.data.KeyBindings.ForceMove)
+		// Left-click is the default D2R movement button. (Right-click is the
+		// right-skill button and only produces "I can't do that here" sounds.)
+		pf.hid.Click(game.LeftButton, x, y)
 		utils.Sleep(50)
 	}
 }
@@ -253,9 +260,9 @@ func (pf *PathFinder) gameCoordsToScreenCords(playerX, playerY, destinationX, de
 	diffY := destinationY - playerY
 
 	// Transform cartesian movement (World) to isometric (screen)
-	// Helpful documentation: https://clintbellanger.net/articles/isometric_math/
-	screenX := int((float32(diffX-diffY) * 19.8) + float32(pf.gr.GameAreaSizeX/2))
-	screenY := int((float32(diffX+diffY) * 9.9) + float32(pf.gr.GameAreaSizeY/2))
+	// Center of virtual 1280x720 screen; Click/MovePointer scale to window.
+	screenX := int((float32(diffX-diffY) * 19.8) + 640.0)
+	screenY := int((float32(diffX+diffY) * 9.9) + 360.0)
 
 	return screenX, screenY
 }

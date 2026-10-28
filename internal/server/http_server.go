@@ -335,11 +335,14 @@ func New(logger *slog.Logger, manager *bot.SupervisorManager, scheduler *bot.Sch
 }
 
 func (s *HttpServer) getProcessList(w http.ResponseWriter, r *http.Request) {
-	processes, err := getRunningProcesses()
+	s.logger.Info("DIAG: process-list handler entered")
+	processes, err := getRunningProcesses(s.logger)
 	if err != nil {
+		s.logger.Info("DIAG: process-list failed", "error", err)
 		http.Error(w, "Failed to get process list", http.StatusInternalServerError)
 		return
 	}
+	s.logger.Info("DIAG: process-list done", "count", len(processes))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(processes)
@@ -355,12 +358,36 @@ func (s *HttpServer) attachProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Under Wine/Proton, OpenProcess expects the Wine-internal Windows PID,
+	// which differs from the Linux PID we receive via the API. Enumerate
+	// Wine processes and resolve to the D2R.exe Wine PID.
+	resolvedPID := uint32(pid)
+	snapshot, snapErr := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if snapErr == nil {
+		var entry windows.ProcessEntry32
+		entry.Size = uint32(unsafe.Sizeof(entry))
+		if err := windows.Process32First(snapshot, &entry); err == nil {
+			for {
+				exeName := strings.ToLower(syscall.UTF16ToString(entry.ExeFile[:]))
+				if exeName == "d2r.exe" || exeName == "main.exe" {
+					s.logger.Info("Resolved Wine PID", "linuxPID", pid, "winePID", entry.ProcessID, "exe", exeName)
+					resolvedPID = entry.ProcessID
+					break
+				}
+				if err := windows.Process32Next(snapshot, &entry); err != nil {
+					break
+				}
+			}
+		}
+		windows.CloseHandle(snapshot)
+	}
+
 	// Find the main window handle (HWND) for the process
 	var hwnd win.HWND
 	enumWindowsCallback := func(h win.HWND, param uintptr) uintptr {
 		var processID uint32
 		win.GetWindowThreadProcessId(h, &processID)
-		if processID == uint32(pid) {
+		if processID == resolvedPID {
 			hwnd = h
 			return 0 // Stop enumeration
 		}
@@ -369,26 +396,29 @@ func (s *HttpServer) attachProcess(w http.ResponseWriter, r *http.Request) {
 
 	windows.EnumWindows(syscall.NewCallback(enumWindowsCallback), nil)
 
+	// Under Wine/Proton + Wayland EnumWindows may find no HWND.
+	// Memory attach only needs the PID; HWND is used for click positioning only.
 	if hwnd == 0 {
-		s.logger.Error("Failed to find window handle for process", "pid", pid)
-		return
+		s.logger.Warn("No window handle found (Wine/Proton?), continuing with HWND=0", "winePID", resolvedPID)
 	}
 
 	// Call manager.Start with the correct arguments, including the HWND
-	go s.manager.Start(characterName, true, false, uint32(pid), uint32(hwnd))
+	go s.manager.Start(characterName, true, false, resolvedPID, uint32(hwnd), uint32(pid))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
 // Add this helper function
-func getRunningProcesses() ([]Process, error) {
+func getRunningProcesses(logger *slog.Logger) ([]Process, error) {
 	var processes []Process
 
+	logger.Info("DIAG: snapshot begin")
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
 		return nil, err
 	}
+	logger.Info("DIAG: snapshot ok")
 	defer windows.CloseHandle(snapshot)
 
 	var entry windows.ProcessEntry32
@@ -400,9 +430,12 @@ func getRunningProcesses() ([]Process, error) {
 	}
 
 	for {
-		windowTitle, _ := getWindowTitle(entry.ProcessID)
+		exeName := syscall.UTF16ToString(entry.ExeFile[:])
+		logger.Info("DIAG: scanning entry", "pid", entry.ProcessID, "exe", exeName)
+		windowTitle, _ := getWindowTitle(logger, entry.ProcessID)
+		logger.Info("DIAG: title fetched", "pid", entry.ProcessID, "title", windowTitle)
 
-		if strings.ToLower(syscall.UTF16ToString(entry.ExeFile[:])) == "d2r.exe" {
+		if strings.ToLower(exeName) == "d2r.exe" {
 			processes = append(processes, Process{
 				WindowTitle: windowTitle,
 				ProcessName: syscall.UTF16ToString(entry.ExeFile[:]),
@@ -422,9 +455,10 @@ func getRunningProcesses() ([]Process, error) {
 	return processes, nil
 }
 
-func getWindowTitle(pid uint32) (string, error) {
+func getWindowTitle(logger *slog.Logger, pid uint32) (string, error) {
 	var windowTitle string
 	var hwnd windows.HWND
+	logger.Info("DIAG: EnumWindows begin", "pid", pid)
 
 	cb := syscall.NewCallback(func(h win.HWND, param uintptr) uintptr {
 		var currentPID uint32
@@ -439,6 +473,7 @@ func getWindowTitle(pid uint32) (string, error) {
 
 	// Enumerate all windows
 	windows.EnumWindows(cb, nil)
+	logger.Info("DIAG: EnumWindows done", "pid", pid, "hwnd", hwnd)
 
 	if hwnd == 0 {
 		return "", fmt.Errorf("no window found for process ID %d", pid)
@@ -952,9 +987,9 @@ func (s *HttpServer) Listen(port int) error {
 	http.HandleFunc("/reset-droplogs", s.resetDroplogs)
 	http.HandleFunc("/process-list", s.getProcessList)
 	http.HandleFunc("/attach-process", s.attachProcess)
-	http.HandleFunc("/ws", s.wsServer.HandleWebSocket)                         // Web socket
-	http.HandleFunc("/initial-data", s.initialData)                            // Web socket data
-	http.HandleFunc("/api/reload-config", s.reloadConfig)                      // New handler
+	http.HandleFunc("/ws", s.wsServer.HandleWebSocket)    // Web socket
+	http.HandleFunc("/initial-data", s.initialData)       // Web socket data
+	http.HandleFunc("/api/reload-config", s.reloadConfig) // New handler
 	http.HandleFunc("/api/supervisors/reorder", s.reorderSupervisors)
 	http.HandleFunc("/api/supervisors/hide", s.hideSupervisor)
 	http.HandleFunc("/api/supervisors/unhide", s.unhideSupervisor)
@@ -1208,7 +1243,6 @@ func (s *HttpServer) startSupervisor(w http.ResponseWriter, r *http.Request) {
 
 	s.initialData(w, r)
 }
-
 
 func (s *HttpServer) reorderSupervisors(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1858,10 +1892,10 @@ func (s *HttpServer) index(w http.ResponseWriter) {
 	}
 
 	s.templates.ExecuteTemplate(w, "index.gohtml", IndexData{
-		Version:   config.Version,
+		Version:     config.Version,
 		Supervisors: supervisors,
-		Status:    status,
-		DropCount: drops,
+		Status:      status,
+		DropCount:   drops,
 	})
 }
 

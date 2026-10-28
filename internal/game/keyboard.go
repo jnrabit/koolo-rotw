@@ -4,6 +4,7 @@ import (
 	"math/rand"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/hectorgimenez/d2go/pkg/data"
 	"github.com/hectorgimenez/koolo/internal/utils/winproc"
@@ -15,12 +16,15 @@ const (
 	keyPressMaxTime = 90 // ms
 )
 
-// PressKey receives an ASCII code and sends a key press event to the game window
+// PressKey receives an ASCII code and sends a key press event to the game window.
+// Uses SendInput (hardware-level), same as Click(): D2R reads keys via
+// DirectInput and ignores PostMessage(WM_KEYDOWN), which made ESC never
+// open the quit menu and game exit time out under Wine.
 func (hid *HID) PressKey(key byte) {
-	win.PostMessage(hid.gr.HWND, win.WM_KEYDOWN, uintptr(key), hid.calculatelParam(key, true))
+	sendInputKey(key, false)
 	sleepTime := rand.Intn(keyPressMaxTime-keyPressMinTime) + keyPressMinTime
 	time.Sleep(time.Duration(sleepTime) * time.Millisecond)
-	win.PostMessage(hid.gr.HWND, win.WM_KEYUP, uintptr(key), hid.calculatelParam(key, false))
+	sendInputKey(key, true)
 }
 
 func (hid *HID) KeySequence(keysToPress ...byte) {
@@ -50,13 +54,37 @@ func (hid *HID) PressKeyBinding(kb data.KeyBinding) {
 // KeyDown sends a key down event to the game window
 func (hid *HID) KeyDown(kb data.KeyBinding) {
 	keys := getKeysForKB(kb)
-	win.PostMessage(hid.gr.HWND, win.WM_KEYDOWN, uintptr(keys[0]), hid.calculatelParam(keys[0], true))
+	sendInputKey(keys[0], false)
 }
 
 // KeyUp sends a key up event to the game window
 func (hid *HID) KeyUp(kb data.KeyBinding) {
 	keys := getKeysForKB(kb)
-	win.PostMessage(hid.gr.HWND, win.WM_KEYUP, uintptr(keys[0]), hid.calculatelParam(keys[0], false))
+	sendInputKey(keys[0], true)
+}
+
+// sendInputKey sends a single keyboard input event via SendInput (hardware-level).
+func sendInputKey(key byte, up bool) {
+	const INPUT_KEYBOARD = 1
+	const KEYEVENTF_KEYUP = 0x0002
+	const INPUT_SIZE = 40
+	if key == 0 || key == 255 {
+		return
+	}
+	buf := make([]byte, INPUT_SIZE)
+	// type = INPUT_KEYBOARD
+	*(*uint32)(unsafe.Pointer(&buf[0])) = INPUT_KEYBOARD
+	// KEYBDINPUT at offset 8: wVk(2) wScan(2) dwFlags(4) time(4) pad(4) dwExtraInfo(8)
+	*(*uint16)(unsafe.Pointer(&buf[8])) = uint16(key)
+	scan, _, _ := winproc.MapVirtualKey.Call(uintptr(key), 0)
+	*(*uint16)(unsafe.Pointer(&buf[10])) = uint16(scan)
+	flags := uint32(0)
+	if up {
+		flags = KEYEVENTF_KEYUP
+	}
+	*(*uint32)(unsafe.Pointer(&buf[12])) = flags
+	// time and dwExtraInfo stay 0
+	winproc.SendInput.Call(1, uintptr(unsafe.Pointer(&buf[0])), INPUT_SIZE)
 }
 
 func getKeysForKB(kb data.KeyBinding) [2]byte {

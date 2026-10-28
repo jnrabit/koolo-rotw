@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -41,9 +42,9 @@ func (gm *Manager) ExitGame() error {
 		data := gm.gr.GetData()
 		if data.OpenMenus.QuitMenu {
 			slog.Debug("quit menu detected, attempting to click exit button")
-			// The click coordinates for the quit menu button are typically around the center, slightly above
-			gm.hid.Click(LeftButton, gm.gr.GameAreaSizeX/2, int(float64(gm.gr.GameAreaSizeY)/2.2))
-			utils.Sleep(100) // Give it time to process the click and transition out of game
+			// Virtual 1280x720 coords; Click scales to actual window.
+			gm.hid.Click(LeftButton, 640, 327)
+			utils.Sleep(300) // Give it time to process the click and transition out of game
 			if !gm.gr.InGame() {
 				return nil
 			}
@@ -52,22 +53,33 @@ func (gm *Manager) ExitGame() error {
 		slog.Debug("trying to open menu and exit game", "attempt", attempt+1)
 		gm.hid.PressKey(win.VK_ESCAPE)
 
+		// Give the quit menu a moment to actually open before checking the flag.
+		utils.Sleep(300)
+
 		if !gm.gr.InGame() {
 			return nil // Exited successfully just by pressing ESC (e.g., if already at main menu)
 		}
 
-		// Check again if the Quit Menu is now open after pressing ESC
 		data = gm.gr.GetData()
 		if data.OpenMenus.QuitMenu {
 			slog.Debug("quit menu opened after ESC, attempting to click exit button")
-			gm.hid.Click(LeftButton, gm.gr.GameAreaSizeX/2, int(float64(gm.gr.GameAreaSizeY)/2.2))
-			utils.Sleep(100) // Give it time to process the click and transition out of game
+			gm.hid.Click(LeftButton, 640, 327)
+			utils.Sleep(300)
+			if !gm.gr.InGame() {
+				return nil
+			}
+		} else if attempt >= 2 {
+			// Quit-menu flag never detected (memory read may be unreliable under
+			// Wine): blindly click the Save-and-Exit position anyway. A missed
+			// click only moves the character a bit, which is harmless here.
+			gm.hid.Click(LeftButton, 640, 327)
+			utils.Sleep(300)
 			if !gm.gr.InGame() {
 				return nil
 			}
 		}
 
-		utils.Sleep(50) // Wait before the next attempt
+		utils.Sleep(100)
 	}
 
 	return errors.New("error exiting game! Timeout after multiple attempts")
@@ -372,6 +384,9 @@ func StartGame(username string, password string, authmethod string, authToken st
 	// Start the game with retry logic for GPU initialization errors
 	for attempt := 0; attempt < maxGPURetries; attempt++ {
 		cmd := exec.Command(config.Koolo.D2RPath+"\\D2R.exe", fullArgs...)
+		// Forward wine-debug output (WINEDEBUG) from the game to our own stderr.
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
 		err = cmd.Start()
 		if err != nil {
 			return 0, 0, err
@@ -385,8 +400,18 @@ func StartGame(username string, password string, authmethod string, authToken st
 				foundHwnd = hwnd
 				return 0
 			}
+			// Wine/Proton fallback: cmd.Process.Pid is a Linux PID which never
+			// matches the Windows PID returned here, so match by window title.
+			titleBuf := make([]uint16, 256)
+			winproc.GetWindowText.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&titleBuf[0])), uintptr(len(titleBuf)))
+			title := syscall.UTF16ToString(titleBuf)
+			if strings.Contains(title, "D2R") || strings.Contains(title, "Diablo") {
+				foundHwnd = hwnd
+				return 0
+			}
 			return 1
 		})
+		deadline := time.Now().Add(60 * time.Second)
 		for {
 			windows.EnumWindows(cb, unsafe.Pointer(&cmd.Process.Pid))
 			if foundHwnd != 0 {
@@ -395,6 +420,10 @@ func StartGame(username string, password string, authmethod string, authToken st
 				windows.EnumWindows(cb, unsafe.Pointer(&cmd.Process.Pid))
 				break
 			}
+			if time.Now().After(deadline) {
+				return 0, 0, fmt.Errorf("D2R window not found after 60s (pid %d)", cmd.Process.Pid)
+			}
+			time.Sleep(500 * time.Millisecond)
 		}
 
 		// Check if the window is a GPU error dialog

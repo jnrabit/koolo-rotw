@@ -112,6 +112,10 @@ func (s *baseSupervisor) ensureProcessIsRunningAndPrepare() error {
 	// Prevent screen from turning off
 	winproc.SetThreadExecutionState.Call(winproc.EXECUTION_STATE_ES_DISPLAY_REQUIRED | winproc.EXECUTION_STATE_ES_CONTINUOUS)
 
+	if os.Getenv("KOOLO_NO_INJECTOR") == "1" {
+		s.bot.ctx.Logger.Info("DIAG: memory injector DISABLED via KOOLO_NO_INJECTOR")
+		return nil
+	}
 	return s.bot.ctx.MemoryInjector.Load()
 }
 
@@ -124,13 +128,38 @@ func (s *baseSupervisor) logGameStart(runs []run.Run) {
 }
 
 func (s *baseSupervisor) waitUntilCharacterSelectionScreen() error {
+	// Already in-world (e.g. auto-login via -username/-password): skip the
+	// whole char-select flow. The main loop handles in-game logic directly.
+	if s.bot.ctx.Manager.InGame() {
+		s.bot.ctx.Logger.Info("DIAG: already in-game, skipping char selection flow")
+		return nil
+	}
+
 	s.bot.ctx.Logger.Info("Waiting for character selection screen...")
 
+	iter := 0
+	const maxIter = 120 // ~30s: D2R may still be loading UI offsets
 	for !s.bot.ctx.GameReader.IsInCharacterSelectionScreen() {
-		// Spam left click to skip to the char select screen
+		iter++
+		if s.bot.ctx.Manager.InGame() {
+			s.bot.ctx.Logger.Info("DIAG: InGame() true while waiting for char select, skipping")
+			return nil
+		}
+		if iter >= maxIter {
+			return fmt.Errorf("character selection screen not detected after %d iterations", iter)
+		}
+		if iter%8 == 0 {
+			gr := s.bot.ctx.GameReader
+			s.bot.ctx.Logger.Info("DIAG: still waiting for char selection",
+				"iterations", iter,
+				"detected", gr.IsInCharacterSelectionScreen(),
+				"selectedName", gr.GameReader.GetSelectedCharacterName(),
+				"win", fmt.Sprintf("%d,%d %dx%d", gr.WindowLeftX, gr.WindowTopY, gr.GameAreaSizeX, gr.GameAreaSizeY))
+		}
 		s.bot.ctx.HID.Click(game.LeftButton, 100, 100)
 		time.Sleep(250 * time.Millisecond)
 	}
+	s.bot.ctx.Logger.Info("DIAG: char selection screen DETECTED", "iterations", iter)
 
 	s.bot.ctx.Logger.Info("Character selection screen found")
 	disconnected := false

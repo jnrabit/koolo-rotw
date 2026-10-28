@@ -170,6 +170,8 @@ func MoveTo(dest data.Position, options ...MoveOption) error {
 			return err
 		}
 		ctx.RefreshGameData()
+		ctx.Logger.Debug(fmt.Sprintf("MoveTo loop: pos=(%d,%d) startArea=%d curArea=%d",
+			ctx.Data.PlayerUnit.Position.X, ctx.Data.PlayerUnit.Position.Y, startArea, ctx.Data.PlayerUnit.Area))
 
 		// If area changed during movement, the destination is no longer valid
 		// This happens during portal interactions - area transition means objective achieved
@@ -359,6 +361,9 @@ func MoveTo(dest data.Position, options ...MoveOption) error {
 			ctx.Logger.Warn("path found but it's empty: [" + ctx.Data.PlayerUnit.Area.Area().Name + "]. Trying to path to Destination: [" + fmt.Sprintf("%d,%d", currentDest.X, currentDest.Y) + "]")
 			return nil
 		}
+
+		ctx.Logger.Debug(fmt.Sprintf("MoveTo: pos=(%d,%d) dest=(%d,%d) dist=%d pathLen=%d",
+			currentPosition.X, currentPosition.Y, currentDest.X, currentDest.Y, currentDistanceToDest, len(path)))
 
 		//Update values
 		lastRun = time.Now()

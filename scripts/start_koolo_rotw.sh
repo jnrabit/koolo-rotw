@@ -33,6 +33,8 @@ fi
 : "${STOP_GRACE_SECONDS:=4}"               # Wartezeit nach graceful /stop
 : "${KILL_WAIT_SECONDS:=5}"                # Wartezeit nach SIGTERM, danach SIGKILL
 : "${PORT_WAIT_SECONDS:=20}"               # max. Wartezeit bis API-Port frei ist
+: "${POST_START_CMD:=}"                    # Hook: nach erfolgreichem Start (z.B. Stream)
+: "${PRE_STOP_CMD:=}"                      # Hook: vor dem Stoppen (z.B. Stream beenden)
 
 # --- Ausgabe -------------------------------------------------------------------
 if [[ -t 2 ]]; then
@@ -56,6 +58,33 @@ read_pid() {
 
 pid_alive() {
     [[ -n "${1:-}" ]] && kill -0 "$1" 2>/dev/null
+}
+
+# Fuehrt einen optionalen Hook-Befehl aus (leer = kein Hook).
+# Fehler im Hook blockieren Start/Stop nicht.
+run_hook() {
+    local name="$1" cmd="$2"
+    [[ -n "$cmd" ]] || return 0
+    log_info "${name}: ${cmd}"
+    # shellcheck disable=SC2086
+    if ! bash -c "$cmd"; then
+        log_warn "${name} fehlgeschlagen (Start/Stop faehrt trotzdem fort)"
+    fi
+}
+
+# Wie run_hook, aber hoechstens einmal pro Skriptlauf (restart-Fall:
+# stop_koolo + kill_existing duerfen den Hook nicht doppelt ausloesen).
+PRE_STOP_FIRED=0
+run_hook_once() {
+    local name="$1" cmd="$2"
+    [[ -n "$cmd" ]] || return 0
+    if [[ "$name" == "PRE_STOP_CMD" && "$PRE_STOP_FIRED" == "1" ]]; then
+        return 0
+    fi
+    run_hook "$name" "$cmd"
+    if [[ "$name" == "PRE_STOP_CMD" ]]; then
+        PRE_STOP_FIRED=1
+    fi
 }
 
 # Ermittelt den Proton-Starter: PROTON_PATH > Steam Experimental > `proton` im PATH
@@ -186,6 +215,7 @@ kill_wine_side() {
 
 # Vor dem Start: alles Alte sicher weg, sonst harter Abbruch
 kill_existing() {
+    run_hook_once "PRE_STOP_CMD" "$PRE_STOP_CMD"
     graceful_stop
     kill_pidfile
     kill_wine_side
@@ -197,6 +227,7 @@ kill_existing() {
 }
 
 stop_koolo() {
+    run_hook_once "PRE_STOP_CMD" "$PRE_STOP_CMD"
     graceful_stop
     kill_pidfile
     kill_wine_side
@@ -254,6 +285,7 @@ start_koolo() {
 
     log_info "Koolo gestartet (PID: $koolo_pid)"
     log_info "Dashboard: http://localhost:${API_PORT}"
+    run_hook "POST_START_CMD" "$POST_START_CMD"
 }
 
 # --- Status / Logs -------------------------------------------------------------
@@ -303,6 +335,8 @@ Konfiguration: Env-Variablen oder $ENV_FILE
   NICE_LEVEL          Prioritaet                   (default: 15)
   MAX_LOG_SIZE        Rotation ab Bytes            (default: 100 MB)
   STOP_GRACE_SECONDS, KILL_WAIT_SECONDS, PORT_WAIT_SECONDS
+  POST_START_CMD      Hook nach erfolgreichem Start (z.B. Stream starten)
+  PRE_STOP_CMD        Hook vor dem Stoppen (z.B. Stream beenden)
 USAGE
 }
 

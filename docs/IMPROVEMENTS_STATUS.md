@@ -158,6 +158,7 @@ fork-spezifisch.
 ## 5. Verwandte Dokumentation
 
 - `docs/DEPLOYMENT_GUIDE.md` — Start/Stop/Rotation/Systemd
+- `docs/STREAMING.md` — Schwesterprojekt `d2r_streaming` (GPU-Streaming, separat)
 - `docs/ANALYSIS_ORIGINAL.md` — Ausgangsanalyse (opencode-Arbeitsstand 2026-10-24)
 - `docs/IMPROVEMENTS_SUMMARY_ORIGINAL.md` — PR-Zusammenfassung Commits 1–5 (Teilmenge dieses Dokuments)
-- `config/koolo-rotw.env.example` — Vorlage für `~/.config/koolo-rotw.env`
+- `config/koolo-rotw.env.example` — Vorlage für `~/.config/koolo-rotw.env` (inkl. Hook-/STREAM_-Beispiele)
